@@ -1,0 +1,119 @@
+/* The home page below the opening: "Coming soon" capsules, the walk through the app (words beside a phone), the
+   closing section. The phone is drawn here, with no Apple artwork; the screenshots are the app's own. */
+
+:root {
+  /* The app's ember (Palette.ember) and the glow of its EmberButton. */
+  --ember-fill: #c2501b;
+  --ember-glow: rgba(255, 112, 40, 0.45);
+  /* Close to a smoothstep: slow out, glide, slow in. */
+  --rise: cubic-bezier(0.45, 0.05, 0.55, 0.95);
+}
+:root[data-tone="dark"] { --ember-fill: #e8703a; }
+
+/* "Coming soon to the App Store": the app's EmberButton look, not a link yet. Its white label is large and bold, so it
+   keeps WCAG's 3:1 for large text on the lighter dark-tone ember. */
+.soon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  margin: 22px 0 0;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: var(--ember-fill);
+  box-shadow: 0 0 28px var(--ember-glow);
+  color: #fff;
+  font: 700 19px/1.2 var(--sans);
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+/* One stop on the walk: phone first, its words above its phone, all centred. */
+.tour {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 36px 0 44px;
+  text-align: center;
+}
+.tour__words { max-width: 34rem; margin: 0 auto 28px; }
+.tour__words h2 { margin: 0 0 10px; font-size: 28px; font-weight: 600; line-height: 1.2; }
+.tour__words p { margin: 0; font-size: 18px; line-height: 1.55; text-wrap: pretty; }
+.tour__words h2,
+.closing h2 { text-wrap: balance; }
+
+/* A phone drawn in CSS: a thin dark bezel, the screenshot filling the screen, the Dynamic Island laid exactly where
+   the screenshots show it (x 461-744 and y 42-151 of 1206 x 2622), and a soft shadow. */
+.phone {
+  --bezel: 9px;
+  position: relative;
+  width: clamp(260px, 72vw, 290px);
+  margin: 0 auto;
+  padding: var(--bezel);
+  border-radius: 50px;
+  background: #0b0b10;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 2px 4px rgba(0, 0, 0, 0.25),
+    0 30px 60px -20px rgba(0, 0, 0, 0.55);
+}
+.phone::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--bezel) + (100% - 2 * var(--bezel)) * 0.382);
+  width: calc((100% - 2 * var(--bezel)) * 0.235);
+  top: calc(var(--bezel) + (100% - 2 * var(--bezel)) * 0.016);
+  height: calc((100% - 2 * var(--bezel)) * 0.042);
+  border-radius: 999px;
+  background: #000;
+}
+.phone__shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1206 / 2622;
+  border-radius: 41px;
+  background: #0a0b16;
+}
+/* Held back until near (time.js), a screenshot shows a dark screen; its alt text stays for assistive technology. */
+.phone__shot:not([src]) { color: transparent; }
+
+/* Reached for the first time, the words fade in and the phone rises after them (tour.js); still below the screen,
+   they wait unseen. */
+.tour__words,
+.phone { transition: opacity 0.6s var(--rise), transform 0.7s var(--rise); }
+.tour.is-seen .phone { transition-delay: 0.15s; }
+.tour.is-waiting .tour__words { opacity: 0; transform: translateY(14px); }
+.tour.is-waiting .phone { opacity: 0; transform: translateY(40px); }
+
+.closing { max-width: 34rem; margin: 0 auto; padding: 44px 0 56px; text-align: center; }
+.closing h2 { margin: 0 0 10px; font-size: 30px; font-weight: 600; }
+.closing p { margin: 0; font-size: 18px; }
+.closing .soon { margin-top: 24px; }
+
+.support { scroll-margin-top: 16px; }
+
+/* Wide screens: words and phone side by side, swapping sides from one stop to the next. */
+@media (min-width: 820px) {
+  .tour {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 72px;
+    padding: 56px 24px;
+    text-align: left;
+  }
+  .tour__words { margin: 0; }
+  .tour__words h2 { font-size: 34px; }
+  .tour--flip .tour__words { order: 2; }
+  .phone { width: 290px; }
+}
+
+/* The smallest phones: the label may take two lines. */
+@media (max-width: 359px) {
+  .soon { white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour__words,
+  .phone { transition: none; }
+}
