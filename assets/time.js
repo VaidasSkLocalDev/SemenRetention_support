@@ -19,6 +19,25 @@
   // The app's screenshots on the home page, and how far ahead of the screen they start loading.
   const SHOT = 'img.phone__shot';
   const SHOT_LEAD = '25%';
+  // Set once the home page's opening has played in this tab.
+  const OPENING_PLAYED_KEY = 'purpose.openingPlayed';
+
+  const openingPlayed = () => {
+    try {
+      return sessionStorage.getItem(OPENING_PLAYED_KEY) === '1';
+    } catch {
+      // Storage turned off: the opening plays.
+      return false;
+    }
+  };
+
+  const markOpeningPlayed = () => {
+    try {
+      sessionStorage.setItem(OPENING_PLAYED_KEY, '1');
+    } catch {
+      // Storage turned off: the opening plays again next time.
+    }
+  };
 
   const phaseAt = (hour) => {
     if (hour >= NIGHT || hour < DAWN) return 'night';
@@ -47,7 +66,10 @@
     document.head.append(link);
   }
 
-  if (root.dataset.page === 'home' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // The home page's opening plays once per visit (the tab): coming back from another page, the words are there at once.
+  const isHome = root.dataset.page === 'home';
+  if (isHome && !matchMedia('(prefers-reduced-motion: reduce)').matches && !openingPlayed()) {
+    markOpeningPlayed();
     root.classList.add('gathering');
     setTimeout(() => root.classList.add('revealed'), SAFETY_REVEAL_MS);
   }
