@@ -165,7 +165,7 @@ li { margin: 6px 0; }
   color: var(--ink);
   text-align: center;
 }
-/* Never wider than the scene's column on a wide screen (the plate is 1536 / 2752 as wide as it is tall). */
+/* Never wider than the plate on a wide screen, over the sky above him (it is 1536 / 2752 as wide as it is tall). */
 .hero__words {
   max-width: min(30rem, 55.8vh);
   max-width: min(30rem, 55.8lvh);

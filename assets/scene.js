@@ -7,7 +7,7 @@ import { sceneLayout } from './layout.js';
 import { createLoop } from './loop.js';
 import { driftScroll } from './math.js';
 import { clearCanvas, makeCanvas, tinted } from './paint.js';
-import { LOOKS, rgba } from './palette.js';
+import { LOOKS } from './palette.js';
 import {
   arcTopClearing, CLOUD_ART, drawClouds, drawMoon, drawSun, moonDisc, moonShows, tintedClouds,
 } from './sky.js';
@@ -29,17 +29,20 @@ const MIST = [
   { image: 'mist-1', centerY: 0.705, height: 0.07, tile: 2.2, speed: 0.005, opacity: 0.45 },
 ];
 const MIST_ROWS = [0.59, 0.74];
-/** Beside the column on a wide screen: how dark the stretched, blurred sky is, the shadow along the column's edges
- * (its width in points and strength), and how small the sky is drawn to blur it. */
-const BACKDROP_DIM = 0.4;
-const EDGE_SHADOW = 48;
-const EDGE_SHADOW_ALPHA = 0.35;
-const BLUR_WIDTH = 24;
+/** On a wide screen the near slopes' cliffs run on this far past the plate's sides (plate widths), fading out from
+ * this share of the way, so the rock in the middle is never repeated. */
+const NEAR_REACH = 0.24;
+const NEAR_FADE_FROM = 0.4;
+/** How far each copy of the painting overlaps the next, in points, so no hairline shows at the joins. */
+const JOIN_OVERLAP = 0.5;
+/** On a wide screen: how soft the scene beside the plate is drawn (points), and how much of the plate's width each of
+ * its sides takes to melt into it. */
+const SIDE_BLUR = 6;
+const PLATE_FEATHER = 0.14;
 /** Room around the figure's canvas, in points. */
 const FIGURE_MARGIN = 4;
 /** The app's ambient clock counts seconds from 2001, so the mist and the clouds stand where the app has them. */
 const REFERENCE_DATE = 978307200;
-const BLACK = [0, 0, 0];
 
 const ambientSeconds = () => Date.now() / 1000 - REFERENCE_DATE;
 
@@ -114,39 +117,119 @@ function placeCanvas(canvas, rect, ratio) {
 
 const padded = (rect, margin) => ({ x: rect.x - margin, y: rect.y - margin, w: rect.w + 2 * margin, h: rect.h + 2 * margin });
 
-function drawRows(ctx, layout, image, [top, bottom]) {
+/** `rows` of `image` where the plate stands `index` plate widths over: the plate's own at 0, mirrored at every odd
+ * step, so each join meets its own reflection and no seam shows. */
+function drawPanel(ctx, layout, image, [top, bottom], index) {
   const { plate } = layout;
-  ctx.drawImage(image, plate.x, plate.y + top * plate.h, plate.w, (bottom - top) * plate.h);
+  const x = plate.x + index * plate.w - JOIN_OVERLAP;
+  const y = plate.y + top * plate.h;
+  const width = plate.w + 2 * JOIN_OVERLAP;
+  const height = (bottom - top) * plate.h;
+  if (index % 2 === 0) {
+    ctx.drawImage(image, x, y, width, height);
+    return;
+  }
+  ctx.save();
+  ctx.translate(x + width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(image, 0, y, width, height);
+  ctx.restore();
 }
 
-/** The sky drawn tiny, halving step by step, to be stretched over the screen as a smooth blur. */
-function shrink(image) {
-  let source = image;
-  let width = image.naturalWidth;
-  let height = image.naturalHeight;
-  while (width / 2 >= BLUR_WIDTH) {
-    width = Math.round(width / 2);
-    height = Math.round(height / 2);
-    const step = makeCanvas(width, height);
-    step.getContext('2d').drawImage(source, 0, 0, width, height);
-    source = step;
-  }
-  return source;
+/** `rows` of `image` over the plate and, on a wide screen, on to the screen's sides (owner, 2026-10-21: the plate
+ * alone looked like a phone's screen). */
+function drawRowsAcross(ctx, layout, image, rows) {
+  for (const index of layout.panels()) drawPanel(ctx, layout, image, rows, index);
 }
 
-/** Beside the column: the same sky stretched, blurred and dimmed, darkening softly toward the column's edges. */
-function drawBackdrop(ctx, layout, blurredSky) {
-  const { width, height, plate } = layout;
-  ctx.drawImage(blurredSky, 0, 0, width, height);
-  ctx.fillStyle = rgba(BLACK, BACKDROP_DIM);
-  ctx.fillRect(0, 0, width, height);
-  for (const [edge, outward] of [[plate.x, -1], [plate.x + plate.w, 1]]) {
-    const shadow = ctx.createLinearGradient(edge, 0, edge + outward * EDGE_SHADOW, 0);
-    shadow.addColorStop(0, rgba(BLACK, EDGE_SHADOW_ALPHA));
-    shadow.addColorStop(1, rgba(BLACK, 0));
-    ctx.fillStyle = shadow;
-    ctx.fillRect(Math.min(edge, edge + outward * EDGE_SHADOW), 0, EDGE_SHADOW, height);
+/** Paints `paint(ctx)` over `rect` softly out of focus: sharp on a canvas of its own, a little larger than `rect` so the
+ * blur has no edge, then laid over `ctx` blurred once, so no join between the copies in it shows. */
+function drawSoft(ctx, rect, paint) {
+  const ratio = ctx.getTransform().a;
+  const margin = SIDE_BLUR * 3;
+  const area = { x: rect.x - margin, y: rect.y - margin, w: rect.w + 2 * margin, h: rect.h + 2 * margin };
+  const canvas = makeCanvas(area.w * ratio, area.h * ratio);
+  const own = canvas.getContext('2d');
+  own.setTransform(ratio, 0, 0, ratio, -area.x * ratio, -area.y * ratio);
+  own.imageSmoothingQuality = 'high';
+  paint(own, area);
+  ctx.save();
+  ctx.filter = `blur(${SIDE_BLUR * ratio}px)`;
+  ctx.drawImage(canvas, area.x, area.y, area.w, area.h);
+  ctx.restore();
+}
+
+/** The sky beside the plate: its painted sky stretched sideways across `area`, each row at the plate's own height, so
+ * the light changes from the top down as over the plate and no mirrored cloud repeats; softened, its clouds lie in
+ * long bands, the one sky. */
+function drawWideSky(ctx, layout, image, area) {
+  const { plate } = layout;
+  const [top, bottom] = ROWS.sky;
+  ctx.drawImage(image, area.x, plate.y + top * plate.h, area.w, (bottom - top) * plate.h);
+}
+
+/** `layout` with the plate's rows from `top` down starting at a canvas's top left, for drawing the plate alone. */
+function plateLocal(layout, top) {
+  const { plate } = layout;
+  return {
+    ...layout,
+    plate: { ...plate, x: 0, y: -top * plate.h },
+    at: (x, y) => ({ x: x * plate.w, y: (y - top) * plate.h }),
+  };
+}
+
+/** The plate's rows from `top` to `bottom`, drawn sharp on a canvas of their own by `draw(ctx, local)`, its sides
+ * fading out, then laid over `ctx` where the plate stands: it melts into the softer scene beside it. */
+function drawFeathered(ctx, layout, [top, bottom], draw) {
+  const { plate } = layout;
+  const ratio = ctx.getTransform().a;
+  const height = (bottom - top) * plate.h;
+  const canvas = makeCanvas(plate.w * ratio, height * ratio);
+  const own = canvas.getContext('2d');
+  own.setTransform(ratio, 0, 0, ratio, 0, 0);
+  own.imageSmoothingQuality = 'high';
+  draw(own, plateLocal(layout, top));
+  const fade = own.createLinearGradient(0, 0, plate.w, 0);
+  fade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  fade.addColorStop(PLATE_FEATHER, 'rgba(0, 0, 0, 1)');
+  fade.addColorStop(1 - PLATE_FEATHER, 'rgba(0, 0, 0, 1)');
+  fade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  own.globalCompositeOperation = 'destination-in';
+  own.fillStyle = fade;
+  own.fillRect(0, 0, plate.w, height);
+  ctx.drawImage(canvas, plate.x, plate.y + top * plate.h, plate.w, height);
+}
+
+/** The near slopes: the plate's own, the rock in the middle; on a wide screen over a softer copy of them whose
+ * cliffs run a little way past the plate's sides, fading into the valley's mist, so the rock is never repeated. */
+function drawNear(ctx, layout, image) {
+  const { plate } = layout;
+  if (plate.x <= 0) {
+    drawPanel(ctx, layout, image, ROWS.near, 0);
+    return;
   }
+  drawSoft(ctx, layout.rows(...ROWS.near), (soft, area) => {
+    [-1, 0, 1].forEach((index) => drawPanel(soft, layout, image, ROWS.near, index));
+    for (const side of [-1, 1]) {
+      const edge = side < 0 ? plate.x : plate.x + plate.w;
+      const fade = soft.createLinearGradient(edge, 0, edge + side * NEAR_REACH * plate.w, 0);
+      fade.addColorStop(NEAR_FADE_FROM, 'rgba(0, 0, 0, 0)');
+      fade.addColorStop(1, 'rgba(0, 0, 0, 1)');
+      soft.save();
+      soft.globalCompositeOperation = 'destination-out';
+      soft.fillStyle = fade;
+      const outer = side < 0 ? area.x : area.x + area.w;
+      soft.fillRect(Math.min(edge, outer), area.y, Math.abs(outer - edge), area.h);
+      soft.restore();
+    }
+  });
+  drawFeathered(ctx, layout, ROWS.near, (own, local) => drawPanel(own, local, image, ROWS.near, 0));
+}
+
+/** `layout` as if the plate stood `index` plate widths over, for what repeats across a wide screen. */
+function shifted(layout, index) {
+  const plate = { ...layout.plate, x: layout.plate.x + index * layout.plate.w };
+  return { ...layout, plate, at: (x, y) => layout.at(x + index, y) };
 }
 
 /** The mist's strips end to end where their drift has taken them at `seconds`, snapped to whole pixels so the joins
@@ -160,8 +243,10 @@ function drawMist(ctx, layout, strips, seconds) {
     const tile = snap(band.tile * plate.w);
     const height = band.height * plate.h;
     const top = plate.y + band.centerY * plate.h - height / 2;
-    const first = snap(plate.x + driftScroll(band.speed, seconds, band.tile) * plate.w - tile);
-    const count = Math.max(Math.ceil((width - plate.x) / tile), 0) + 1;
+    // From the screen's left edge, which on a wide screen lies past the plate's.
+    const drifted = plate.x + driftScroll(band.speed, seconds, band.tile) * plate.w - tile;
+    const first = snap(drifted - Math.max(0, Math.ceil(drifted / tile)) * tile);
+    const count = Math.max(Math.ceil((width - first) / tile), 0);
     const strip = strips[band.image];
     ctx.globalAlpha = band.opacity;
     for (let index = 0; strip && index < count; index += 1) {
@@ -194,7 +279,6 @@ export class Scene {
       ['mist-1', 'mist-2'].filter((name) => art[name]).map((name) => [name, tinted(art[name], look.mist)]),
     );
     this.clouds = look.cloudShade ? tintedClouds(art, look) : [];
-    this.blurredSky = shrink(art.sky);
     this.painter = (ctx, layout) => drawPoints(ctx, layout, LIT);
     this.layers = buildLayers(root, look.stars);
     this.size = '';
@@ -220,7 +304,7 @@ export class Scene {
     this.drawBack(placeCanvas(this.layers.back, screen, ratio));
     if (this.layers.stars) placeCanvas(this.layers.stars, layout.rows(0, STARS_BOTTOM), ratio);
     placeCanvas(this.layers.mist, layout.rows(...MIST_ROWS), ratio);
-    drawRows(placeCanvas(this.layers.near, layout.rows(...ROWS.near), ratio), layout, this.art.near, ROWS.near);
+    drawNear(placeCanvas(this.layers.near, layout.rows(...ROWS.near), ratio), layout, this.art.near);
     const figure = placeCanvas(this.layers.figure, padded(layout.figure, FIGURE_MARGIN), ratio);
     drawFigure(figure, layout.figure, this.look.rim);
     placeCanvas(this.layers.glow, screen, ratio);
@@ -228,21 +312,32 @@ export class Scene {
     this.paintGlow(this.painter);
   }
 
-  /** What never moves behind the mist: the sky, its clouds, the moon and the sun, then the far ridges. */
+  /** What never moves behind the mist: the sky, its clouds, the moon and the sun, then the far ridges. On a wide screen
+   * they run on to the sides softly out of focus, so their mirrored copies don't read as such, and the plate's own,
+   * sharp, melts into them (owner, 2026-10-21: the plate alone looked like a phone's screen). */
   drawBack(ctx) {
     const { layout, art, look, hour } = this;
-    const { plate } = layout;
-    if (plate.x > 0) drawBackdrop(ctx, layout, this.blurredSky);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(plate.x, plate.y, plate.w, plate.h);
-    ctx.clip();
-    drawRows(ctx, layout, art.sky, ROWS.sky);
+    if (layout.plate.x <= 0) {
+      this.drawPlateBack(ctx, layout);
+      return;
+    }
+    drawSoft(ctx, { x: 0, y: 0, w: layout.width, h: layout.height }, (soft, area) => {
+      drawWideSky(soft, layout, art.sky, area);
+      layout.panels().forEach((index) => drawClouds(soft, shifted(layout, index), this.clouds, ambientSeconds()));
+      if (look.sun) drawSun(soft, layout, hour, this.arcTop);
+      drawRowsAcross(soft, layout, art.far, ROWS.far);
+    });
+    drawFeathered(ctx, layout, [0, 1], (own, local) => this.drawPlateBack(own, local));
+  }
+
+  /** The plate's own sky, its clouds, the moon and the sun, then the far ridges. */
+  drawPlateBack(ctx, layout) {
+    const { art, look, hour } = this;
+    drawPanel(ctx, layout, art.sky, ROWS.sky, 0);
     drawClouds(ctx, layout, this.clouds, ambientSeconds());
     if (art.moon) drawMoon(ctx, layout, hour, art.moon, look.moon, this.arcTop);
     if (look.sun) drawSun(ctx, layout, hour, this.arcTop);
-    drawRows(ctx, layout, art.far, ROWS.far);
-    ctx.restore();
+    drawPanel(ctx, layout, art.far, ROWS.far, 0);
   }
 
   /** The stars and the mist at `seconds` on the ambient clock. */
@@ -252,7 +347,7 @@ export class Scene {
     if (layers.stars) {
       const stars = layers.stars.getContext('2d');
       clearCanvas(stars);
-      drawStars(stars, layout, seconds, this.moon);
+      layout.panels().forEach((index) => drawStars(stars, shifted(layout, index), seconds, this.moon));
     }
     const mist = layers.mist.getContext('2d');
     clearCanvas(mist);
